@@ -498,6 +498,10 @@ class ModelResponseIterator:
         self.is_response_format_tool: bool = False
         # Track if we've converted any response_format tools (affects finish_reason)
         self.converted_response_format_tool: bool = False
+        
+        # Track current tool info for delta chunks
+        self.current_tool_id: Optional[str] = None
+        self.current_tool_name: Optional[str] = None
 
     def check_empty_tool_call_args(self) -> bool:
         """
@@ -551,10 +555,10 @@ class ModelResponseIterator:
             text = content_block["delta"]["text"]
         elif "partial_json" in content_block["delta"]:
             tool_use = {
-                "id": None,
+                "id": self.current_tool_id,
                 "type": "function",
                 "function": {
-                    "name": None,
+                    "name": self.current_tool_name,
                     "arguments": content_block["delta"]["partial_json"],
                 },
                 "index": self.tool_index,
@@ -672,11 +676,14 @@ class ModelResponseIterator:
                     text = content_block_start["content_block"]["text"]
                 elif content_block_start["content_block"]["type"] == "tool_use":
                     self.tool_index += 1
+                    # Store current tool info for delta chunks
+                    self.current_tool_id = content_block_start["content_block"]["id"]
+                    self.current_tool_name = content_block_start["content_block"]["name"]
                     tool_use = {
-                        "id": content_block_start["content_block"]["id"],
+                        "id": self.current_tool_id,
                         "type": "function",
                         "function": {
-                            "name": content_block_start["content_block"]["name"],
+                            "name": self.current_tool_name,
                             "arguments": "",
                         },
                         "index": self.tool_index,
@@ -697,16 +704,19 @@ class ModelResponseIterator:
                 is_empty = self.check_empty_tool_call_args()
                 if is_empty:
                     tool_use = {
-                        "id": None,
+                        "id": self.current_tool_id,
                         "type": "function",
                         "function": {
-                            "name": None,
+                            "name": self.current_tool_name,
                             "arguments": "{}",
                         },
                         "index": self.tool_index,
                     }
                 # Reset response_format tool tracking when block stops
                 self.is_response_format_tool = False
+                # Reset current tool info
+                self.current_tool_id = None
+                self.current_tool_name = None
             elif type_chunk == "message_delta":
                 finish_reason, usage = self._handle_message_delta(chunk)
             elif type_chunk == "message_start":
